@@ -33,11 +33,6 @@ static int get_page_count(int rank) {
     return 1 << (rank - 1);
 }
 
-// Get the number of blocks for a given rank
-static int get_block_count(int rank) {
-    return total_pages >> (rank - 1);
-}
-
 // Get the buddy of a block
 static void *get_buddy(void *p, int rank) {
     uintptr_t addr = (uintptr_t)p;
@@ -100,18 +95,6 @@ static void mark_pages_unallocated(void *p, int rank) {
     for (int i = 0; i < count; i++) {
         set_page_rank(page_idx + i, 0);
     }
-}
-
-// Check if all pages in a block are unallocated
-static int are_all_pages_unallocated(void *p, int rank) {
-    int page_idx = get_page_index(p);
-    int count = get_page_count(rank);
-    for (int i = 0; i < count; i++) {
-        if (is_page_allocated(page_idx + i)) {
-            return 0;
-        }
-    }
-    return 1;
 }
 
 // Check if a block is in the free list (O(1) using bitmap)
@@ -283,12 +266,13 @@ int query_ranks(void *p) {
     }
 
     // If unallocated, find the maximum rank where this address could be a valid block
-    // and all pages in that block are unallocated
+    // Use the free bitmap for O(1) check instead of O(2^rank) page iteration
     for (int r = max_rank; r >= 1; r--) {
         uintptr_t size = get_size(r);
         uintptr_t offset = addr - base;
         if (offset % size == 0 && offset + size <= total_pages * PAGE_SIZE) {
-            if (are_all_pages_unallocated(p, r)) {
+            // Check if this block is in the free list (all pages unallocated)
+            if (is_in_free_list(p, r)) {
                 return r;
             }
         }

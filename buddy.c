@@ -15,6 +15,9 @@ static void *free_lists[MAX_RANK + 1];
 // For rank r, we need MAX_PAGES / (2^(r-1)) bits
 static unsigned char free_bitmap[MAX_RANK + 1][MAX_PAGES / 8 + 1];
 
+// Count of free blocks for each rank
+static int free_counts[MAX_RANK + 1];
+
 // Base address and total pages
 static void *base_addr = NULL;
 static int total_pages = 0;
@@ -127,6 +130,7 @@ static void remove_from_list(void *p, int rank) {
         *prev = *(void **)p;
     }
     set_free_bitmap(p, rank, 0);
+    free_counts[rank]--;
 }
 
 // Insert a block into the free list
@@ -134,6 +138,7 @@ static void insert_into_list(void *p, int rank) {
     *(void **)p = free_lists[rank];
     free_lists[rank] = p;
     set_free_bitmap(p, rank, 1);
+    free_counts[rank]++;
 }
 
 int init_page(void *p, int pgcount) {
@@ -151,6 +156,7 @@ int init_page(void *p, int pgcount) {
     // Initialize all free lists to NULL
     for (int i = 1; i <= MAX_RANK; i++) {
         free_lists[i] = NULL;
+        free_counts[i] = 0;
     }
 
     // Initialize free bitmaps (all not free)
@@ -286,12 +292,5 @@ int query_page_counts(int rank) {
         return -EINVAL;
     }
 
-    int count = 0;
-    void *p = free_lists[rank];
-    while (p != NULL) {
-        count++;
-        p = *(void **)p;
-    }
-
-    return count;
+    return free_counts[rank];
 }

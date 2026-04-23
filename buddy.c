@@ -8,9 +8,6 @@
 #define PAGE_SIZE 4096
 #define MAX_PAGES 32768
 
-// Free lists for each rank (1-indexed)
-static void *free_lists[MAX_RANK + 1];
-
 // Bitmaps to track free blocks for each rank
 // For rank r, we need MAX_PAGES / (2^(r-1)) bits
 static unsigned char free_bitmap[MAX_RANK + 1][MAX_PAGES / 8 + 1];
@@ -100,8 +97,8 @@ static void mark_pages_unallocated(void *p, int rank) {
     }
 }
 
-// Check if a block is in the free list (O(1) using bitmap)
-static int is_in_free_list(void *p, int rank) {
+// Check if a block is free (O(1) using bitmap)
+static int is_block_free(void *p, int rank) {
     int block_idx = get_block_index(p, rank);
     int byte_idx = block_idx / 8;
     int bit_idx = block_idx % 8;
@@ -109,41 +106,30 @@ static int is_in_free_list(void *p, int rank) {
 }
 
 // Set a block as free or not in the bitmap
-static void set_free_bitmap(void *p, int rank, int free) {
+static void set_block_free(void *p, int rank, int free) {
     int block_idx = get_block_index(p, rank);
     int byte_idx = block_idx / 8;
     int bit_idx = block_idx % 8;
     if (free) {
         free_bitmap[rank][byte_idx] |= (1 << bit_idx);
+        free_counts[rank]++;
     } else {
         free_bitmap[rank][byte_idx] &= ~(1 << bit_idx);
+        free_counts[rank]--;
     }
 }
 
-// Remove a block from the free list
-static void remove_from_list(void *p, int rank) {
-    // Check if block is at head of list (common case in alloc_pages)
-    if (free_lists[rank] == p) {
-        free_lists[rank] = *(void **)p;
-    } else {
-        void **prev = (void **)&free_lists[rank];
-        while (*prev != NULL && *prev != p) {
-            prev = (void **)*prev;
-        }
-        if (*prev == p) {
-            *prev = *(void **)p;
+// Find a free block of given rank (return NULL if none)
+static void *find_free_block(int rank) {
+    int num_blocks = total_pages >> (rank - 1);
+    for (int i = 0; i < num_blocks; i++) {
+        int byte_idx = i / 8;
+        int bit_idx = i % 8;
+        if ((free_bitmap[rank][byte_idx] >> bit_idx) & 1) {
+            return (void *)((char *)base_addr + (i << (rank - 1)) * PAGE_SIZE);
         }
     }
-    set_free_bitmap(p, rank, 0);
-    free_counts[rank]--;
-}
-
-// Insert a block into the free list
-static void insert_into_list(void *p, int rank) {
-    *(void **)p = free_lists[rank];
-    free_lists[rank] = p;
-    set_free_bitmap(p, rank, 1);
-    free_counts[rank]++;
+    return NULL;
 }
 
 int init_page(void *p, int pgcount) {
@@ -158,20 +144,19 @@ int init_page(void *p, int pgcount) {
         max_rank++;
     }
 
-    // Initialize all free lists to NULL
-    for (int i = 1; i <= MAX_RANK; i++) {
-        free_lists[i] = NULL;
-        free_counts[i] = 0;
-    }
-
     // Initialize free bitmaps (all not free)
     memset(free_bitmap, 0, sizeof(free_bitmap));
+
+    // Initialize free counts
+    for (int i = 1; i <= MAX_RANK; i++) {
+        free_counts[i] = 0;
+    }
 
     // Initialize allocation ranks (all unallocated)
     memset(alloc_rank, 0, sizeof(alloc_rank));
 
-    // Insert the entire memory pool into the appropriate free list
-    insert_into_list(p, max_rank);
+    // Mark the entire memory pool as free at max_rank
+    set_block_free(p, max_rank, 1);
 
     return OK;
 }
@@ -191,15 +176,20 @@ void *alloc_pages(int rank) {
         return ERR_PTR(-ENOSPC);
     }
 
-    // Remove the block from the free list
-    void *block = free_lists[curr_rank];
-    remove_from_list(block, curr_rank);
+    // Find a free block at curr_rank
+    void *block = find_free_block(curr_rank);
+    if (block == NULL) {
+        return ERR_PTR(-ENOSPC);
+    }
+
+    // Mark block as not free
+    set_block_free(block, curr_rank, 0);
 
     // Split the block down to the requested rank
     while (curr_rank > rank) {
         curr_rank--;
         void *buddy = (void *)((char *)block + get_size(curr_rank));
-        insert_into_list(buddy, curr_rank);
+        set_block_free(buddy, curr_rank, 1);
     }
 
     // Mark pages as allocated with the requested rank
@@ -238,13 +228,13 @@ void *return_pages(void *p) {
     while (rank < max_rank) {
         void *buddy = get_buddy(block, rank);
 
-        // Check if buddy is in free list (unallocated) - O(1) using bitmap
-        if (!is_in_free_list(buddy, rank)) {
+        // Check if buddy is free (unallocated) - O(1) using bitmap
+        if (!is_block_free(buddy, rank)) {
             break;
         }
 
-        // Remove buddy from free list
-        remove_from_list(buddy, rank);
+        // Mark buddy as not free
+        set_block_free(buddy, rank, 0);
 
         // Merge - keep the lower address
         if ((uintptr_t)buddy < (uintptr_t)block) {
@@ -253,7 +243,8 @@ void *return_pages(void *p) {
         rank++;
     }
 
-    insert_into_list(block, rank);
+    // Mark the merged block as free
+    set_block_free(block, rank, 1);
     return ERR_PTR(OK);
 }
 
@@ -282,8 +273,8 @@ int query_ranks(void *p) {
         uintptr_t size = get_size(r);
         uintptr_t offset = addr - base;
         if (offset % size == 0 && offset + size <= total_pages * PAGE_SIZE) {
-            // Check if this block is in the free list (all pages unallocated)
-            if (is_in_free_list(p, r)) {
+            // Check if this block is free (all pages unallocated)
+            if (is_block_free(p, r)) {
                 return r;
             }
         }

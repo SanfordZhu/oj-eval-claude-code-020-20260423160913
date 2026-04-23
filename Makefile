@@ -1,3 +1,3 @@
 .PHONY: all
 all:
-	gcc -Wno-int-conversion -o code main.c buddy.c
+	gcc -O3 -Wno-int-conversion -o code main.c buddy.c

@@ -186,23 +186,23 @@ void *alloc_pages(int rank) {
     return block;
 }
 
-int return_pages(void *p) {
+void *return_pages(void *p) {
     if (p == NULL) {
-        return -EINVAL;
+        return ERR_PTR(-EINVAL);
     }
 
     uintptr_t addr = (uintptr_t)p;
     uintptr_t base = (uintptr_t)base_addr;
 
     if (addr < base || addr >= base + total_pages * PAGE_SIZE) {
-        return -EINVAL;
+        return ERR_PTR(-EINVAL);
     }
 
     int page_idx = get_page_index(p);
 
     // Check if page is allocated
     if (!is_page_allocated(page_idx)) {
-        return -EINVAL;
+        return ERR_PTR(-EINVAL);
     }
 
     // Get the rank at which this page was allocated
@@ -232,7 +232,7 @@ int return_pages(void *p) {
     }
 
     insert_into_list(block, rank);
-    return OK;
+    return ERR_PTR(OK);
 }
 
 int query_ranks(void *p) {

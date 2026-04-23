@@ -1,3 +1,3 @@
 .PHONY: all
 all:
-	gcc -o code main.c buddy.c
+	gcc -Wno-error -o code main.c buddy.c

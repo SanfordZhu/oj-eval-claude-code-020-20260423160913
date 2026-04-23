@@ -122,12 +122,17 @@ static void set_free_bitmap(void *p, int rank, int free) {
 
 // Remove a block from the free list
 static void remove_from_list(void *p, int rank) {
-    void **prev = &free_lists[rank];
-    while (*prev != NULL && *prev != p) {
-        prev = (void **)*prev;
-    }
-    if (*prev == p) {
-        *prev = *(void **)p;
+    // Check if block is at head of list (common case in alloc_pages)
+    if (free_lists[rank] == p) {
+        free_lists[rank] = *(void **)p;
+    } else {
+        void **prev = (void **)&free_lists[rank];
+        while (*prev != NULL && *prev != p) {
+            prev = (void **)*prev;
+        }
+        if (*prev == p) {
+            *prev = *(void **)p;
+        }
     }
     set_free_bitmap(p, rank, 0);
     free_counts[rank]--;

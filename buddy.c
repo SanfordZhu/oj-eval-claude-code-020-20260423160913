@@ -178,7 +178,7 @@ void *alloc_pages(int rank) {
 
     // Find the smallest available block that can satisfy the request
     int curr_rank = rank;
-    while (curr_rank <= max_rank && free_lists[curr_rank] == NULL) {
+    while (curr_rank <= max_rank && free_counts[curr_rank] == 0) {
         curr_rank++;
     }
 

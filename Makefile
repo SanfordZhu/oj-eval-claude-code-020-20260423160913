@@ -1,3 +1,3 @@
 .PHONY: all
 all:
-	gcc -Wno-error -o code main.c buddy.c
+	gcc -Wno-int-conversion -o code main.c buddy.c
